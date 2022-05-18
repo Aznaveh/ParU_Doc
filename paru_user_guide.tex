@@ -1,0 +1,449 @@
+\documentclass[12pt]{article}
+\usepackage{hyperref}
+
+\topmargin -0.5in
+\textheight 9.0in
+\oddsidemargin 0pt
+\evensidemargin 0pt
+\textwidth 6.5in
+
+%-------------------------------------------------------------------------------
+% get epsf.tex file, for encapsulated postscript files:
+\input epsf
+%-------------------------------------------------------------------------------
+% macro for Postscript figures the easy way
+% usage:  \postscript{file.ps}{scale}
+% where scale is 1.0 for 100%, 0.5 for 50% reduction, etc.
+%
+\newcommand{\postscript}[2]
+{\setlength{\epsfxsize}{#2\hsize}
+\centerline{\epsfbox{#1}}}
+%-------------------------------------------------------------------------------
+
+\title{User's Guide for ParU, an unsymmetric multifrontal multithreaded sparse
+LU factorization package}
+\author{Mohsen Aznaveh\thanks{
+email: aznaveh@tamu.edu.
+http://www.suitesparse.com.
+},
+Timothy A. Davis}
+
+\date{VERSION 0.0.0, May 20, 2022}
+
+%-------------------------------------------------------------------------------
+\begin{document}
+%-------------------------------------------------------------------------------
+\maketitle
+
+\begin{abstract}
+
+ParU is an implementation of the multifrontal sparse LU factorization
+method.  Parallelism is exploited both in the BLAS and across different frontal
+matrices using OpenMP tasking, a shared-memory programming model for modern 
+multicore architectures. The package is written in C++ and real sparse matrices 
+are supported.
+
+\end{abstract}
+
+\maketitle
+
+%-------------------------------------------------------------------------------
+\section{Introduction}
+\label{intro}
+%-------------------------------------------------------------------------------
+
+The algorithms used in ParU will be discussed in a companion paper,
+?. This document gives detailed information on the installation
+and use of ParU.
+ParU is a parallel sparse direct solver. This package uses OpenMP
+tasking for parallelism. ParU calls UMFPACK for symbolic analysis phase,
+after that some symbolic analysis is done by ParU itself and  then numeric
+phase starts. The numeric computation is a task parallel phase using OpenMP
+and each task calls parallel BLAS; i.e. nested parallism. 
+The performance of BLAS has a heavy impact on the performance of ParU.
+However, depending on the input problem performance of parallelsim in BLAS 
+sometimes does not have effects in ParU.
+
+
+%-------------------------------------------------------------------------------
+\subsubsection{Instructions on using METIS}
+%-------------------------------------------------------------------------------
+
+SuiteSparse now on METIS 5.1.0, which is distributed along with
+SuiteSparse itself.  Its use is optional, however. ParU is using METIS as the 
+default ordering. METIS tends to give orderings that are good for the 
+parallelism. You can compile and run your code without using METIS; We recommend 
+using METIS along with ParU.
+
+Note that METIS is not bug-free; it can occasionally cause segmentation 
+faults, particularly if used when finding basic solutions to underdetermined 
+systems with many more columns than rows .ParU do not solve such 
+systems anyway but you might see some problems with other SuiteSparse packages.
+
+%-------------------------------------------------------------------------------
+\section{Using ParU in C and C++}
+%-------------------------------------------------------------------------------
+
+ParU relies on CHOLMOD for its basic sparse matrix data structure, a compressed 
+sparse column format.  CHOLMOD provides interfaces to the AMD, COLAMD, and METIS
+ordering methods, writing a matrix to a file, and many other
+functions. ParU also relies on UMFPACK Version 6.0 or higher for symbolic 
+analysis. 
+
+
+%-------------------------------------------------------------------------------
+\subsection{Installing the C/C++ library on Linux/Unix}
+%-------------------------------------------------------------------------------
+
+Before you compile the SuiteSparseQR library and demo programs, you may wish to
+edit the \verb'SuiteSparse/SuiteSparse_config/SuiteSparse_config.mk' configuration file.  The
+defaults should be fine on most Linux/Unix systems and on the Mac.
+It automatically detects what system you have and sets compile parameters
+accordingly.
+
+Next, type \verb'make' at
+the Linux/Unix command line, in either the \verb'SuiteSparse' directory (which
+compiles all of SuiteSparse) or in the \verb'SuiteSparse/SPQR' directory (which
+just compiles SuiteSparseQR and the libraries it requires).  SuiteSparseQR will
+be compiled, and a set of simple demos will be run (including the one in the
+next section).
+
+The configuration file defines where the LAPACK and BLAS libraries are to be
+found.  Selecting the right BLAS is critical.  There is no standard naming
+scheme for the name and location of these libraries.  The defaults in the
+\verb'SuiteSparse_config.mk' file use \verb'-llapack' and \verb'-lblas'; the latter may
+link against the standard Fortran reference BLAS, which will not provide
+optimal performance.  For best results, you should use the OpenBLAS
+at openblas.net
+(based on the Goto BLAS)
+\cite{GotoVanDeGeijn08}, or high-performance vendor-supplied BLAS such as the
+Intel MKL, AMD ACML, or the Sun Performance Library.  Selection of LAPACK and
+the BLAS is done with the \verb'LAPACK=' and \verb'BLAS=' lines in the
+\verb'SuiteSparse_config.mk' file.
+
+Four compile-time options can be used to modify how SuiteSparseQR is compiled.
+Select these via the \verb'SPQR_CONFIG=' line in the \verb'SuiteSparse_config.mk' file.
+
+\begin{itemize}
+
+    \item \verb'-DNPARTITION': do not compile with METIS, CAMD, or CCOLAMD.
+    These packages are included by default.
+
+    \item \verb'-DNEXPERT': do not compile with the ``expert'' routines in
+    \verb'SuiteSparseQR_expert.cpp'.  The expert routines are included by
+    default.
+
+    \item \verb'-DHAVE_TBB': enable the Intel Threading Building Blocks, TBB.
+    The use of TBB is disabled by default.  It is disabled because not all
+    installations have TBB available.  The use of TBB is recommended, however,
+    if you have a multicore computer.
+
+\end{itemize}
+
+To fully test 100\% of the lines of SuiteSparseQR, go to the \verb'Tcov'
+directory and type \verb'make'.  This will work for Linux only.
+
+To install the shared library
+into /usr/local/lib and /usr/local/include, do {\tt make install}.
+To uninstall, do {\tt make uninstall}.
+For more options, see the {\tt SuiteSparse/README.txt} file.
+
+%-------------------------------------------------------------------------------
+\subsection{C/C++ Example}
+%-------------------------------------------------------------------------------
+
+The C++ interface is written using templates for handling both real and complex
+matrices.  The simplest function computes the MATLAB equivalent of
+\verb'x=A\b' and is almost as simple:
+{\footnotesize
+\begin{verbatim}
+    #include "SuiteSparseQR.hpp"
+    X = SuiteSparseQR <double> (A, B, cc) ;
+\end{verbatim}
+}
+The C version of this function is almost identical:
+{\footnotesize
+\begin{verbatim}
+    #include "SuiteSparseQR_C.h"
+    X = SuiteSparseQR_C_backslash_default (A, B, cc) ;
+\end{verbatim}
+}
+
+Below is a simple C++ program that illustrates the use of SuiteSparseQR.  The
+program reads in a least-squares problem from \verb'stdin' in MatrixMarket
+format \cite{BoisvertPozoRemingtonBarrettDongarra97}, solves it, and prints the
+norm of the residual and the estimated rank of \verb'A'.  The comments reflect
+the MATLAB equivalent statements.  The C version of this program is identical
+except for the \verb'#include' statement and call to SuiteSparseQR which are
+replaced with the C version of the statement above, and C-style comments.
+
+{\footnotesize
+\begin{verbatim}
+    #include "SuiteSparseQR.hpp"
+    int main (int argc, char **argv)
+    {
+        cholmod_common Common, *cc ;
+        cholmod_sparse *A ;
+        cholmod_dense *X, *B, *Residual ;
+        double rnorm, one [2] = {1,0}, minusone [2] = {-1,0} ;
+        int mtype ;
+
+        // start CHOLMOD
+        cc = &Common ;
+        cholmod_l_start (cc) ;
+
+        // load A
+        A = (cholmod_sparse *) cholmod_l_read_matrix (stdin, 1, &mtype, cc) ;
+
+        // B = ones (size (A,1),1)
+        B = cholmod_l_ones (A->nrow, 1, A->xtype, cc) ;
+
+        // X = A\B
+        X = SuiteSparseQR <double> (A, B, cc) ;
+
+        // rnorm = norm (B-A*X)
+        Residual = cholmod_l_copy_dense (B, cc) ;
+        cholmod_l_sdmult (A, 0, minusone, one, X, Residual, cc) ;
+        rnorm = cholmod_l_norm_dense (Residual, 2, cc) ;
+        printf ("2-norm of residual: %8.1e\n", rnorm) ;
+        printf ("rank %ld\n", cc->SPQR_istat [4]) ;
+
+        // free everything and finish CHOLMOD
+        cholmod_l_free_dense (&Residual, cc) ;
+        cholmod_l_free_sparse (&A, cc) ;
+        cholmod_l_free_dense (&X, cc) ;
+        cholmod_l_free_dense (&B, cc) ;
+        cholmod_l_finish (cc) ;
+        return (0) ;
+    }
+\end{verbatim}
+}
+
+%-------------------------------------------------------------------------------
+\subsection{C++ Syntax}
+%-------------------------------------------------------------------------------
+
+All features available to the MATLAB user are also available to both the C and
+C++ interfaces using a syntax that is not much more complicated than the MATLAB
+syntax.  Additional features not available via the MATLAB interface include the
+ability to compute the symbolic and numeric factorizations separately (for
+multiple matrices with the same nonzero pattern but different numerical
+values).  The following is a list of user-callable C++ functions and what they
+can do:
+
+\begin{enumerate}
+
+    \item \verb'SuiteSparseQR': an overloaded function that provides functions
+    equivalent to \verb'spqr' and \verb'spqr_solve' in the SuiteSparseQR MATLAB
+    interface.
+
+    \item \verb'SuiteSparseQR_factorize': performs both the symbolic and
+    numeric factorizations and returns a QR factorization object such that
+    \verb'A*P=Q*R'.  It always exploits singletons.
+
+    \item \verb'SuiteSparseQR_symbolic': performs the symbolic factorization
+    and returns a QR factorization object to be passed to
+    \verb'SuiteSparseQR_numeric'.  It does not exploit singletons.
+
+    \item \verb'SuiteSparseQR_numeric': performs the numeric factorization on a
+    QR factorization object, either one constructed by
+    \verb'SuiteSparseQR_symbolic', or reusing one from a prior call to
+    \verb'SuiteSparseQR_numeric' for a matrix \verb'A' with the same pattern as
+    the first one, but with different numerical values.
+
+    \item \verb'SuiteSparseQR_solve': solves a linear system using the object
+    returned by \newline \verb'SuiteSparseQR_factorize' or
+    \verb'SuiteSparseQR_numeric', namely \verb"x=R\b", \newline \verb"x=P*R\b",
+    \verb"x=R'\b", or \verb"x=R'\(P'*b)".
+
+    \item \verb'SuiteSparseQR_qmult': provides the same function as
+    \verb'spqr_qmult' in the MATLAB interface, computing
+    \verb"Q'*x", \verb"Q*x", \verb"x*Q'", or \verb"x*Q".
+    It uses either a QR factorization
+    in MATLAB-style sparse matrix format, or the QR factorization object
+    returned by \newline \verb'SuiteSparseQR_factorize' or
+    \verb'SuiteSparseQR_numeric'.
+
+    \item \verb'SuiteSparseQR_min2norm': finds the minimum 2-norm solution to
+    an underdetermined linear system.
+
+    \item \verb'SuiteSparseQR_free': frees the QR factorization object.
+
+\end{enumerate}
+
+%-------------------------------------------------------------------------------
+\subsection{Details of the C/C++ Syntax}
+%-------------------------------------------------------------------------------
+
+For further details of how to use the C/C++ syntax, please refer to the
+definitions and descriptions in the following files:
+
+\begin{enumerate}
+\item \verb'SuiteSparse/SPQR/Include/SuiteSparseQR.hpp' describes each
+C++ function.  Both \verb'double' and \verb'std::complex<double>' matrices
+are supported.
+
+\item \verb'SuiteSparse/SPQR/Include/SuiteSparseQR_definitions.h' describes
+definitions \newline common to both C and C++ functions.  For example, each of
+the ordering methods is given a \verb'#define''d name.  The default is
+\verb'ordering = SPQR_ORDERING_DEFAULT', and the default tolerance is given by
+\verb'tol = SPQR_DEFAULT_TOL'.
+
+\item \verb'SuiteSparse/SPQR/Include/SuiteSparseQR_C.h' describes
+the C-callable functions.
+
+\end{enumerate}
+
+Most of the packages in SuiteSparse come in multiple versions with different
+sized integers.  The first is the plain C/C++ \verb'int'.  The second the
+\verb'SuiteSparse_long' integer, defined in the
+\verb'SuiteSparse/SuiteSparse_config/SuiteSparse_config.h'
+file.  This integer is \verb'long' except on a Windows-64 platform for which it
+is the  \verb'__int64' type.  The intent of \verb'SuiteSparse_long'
+is that it should be
+32-bits on a 32-bit platform, and 64-bits on a 64-bit platform.  
+
+By contrast, SuiteSparseQR only provides a \verb'SuiteSparse_long' version.
+Most users (except Windows-64) can simply use \verb'long' as the basic integer
+type passed to and returned from SuiteSparseQR.
+
+The C/C++ options corresponding to the MATLAB \verb'opts' parameters and the
+contents of the optional \verb'info' output of \verb'spqr_solve' are described
+below.  Let \verb'cc' be the CHOLMOD \verb'Common' object, containing parameter
+settings and statistics.  All are of type \verb'double', except for
+\verb'SPQR_istat' which is \verb'SuiteSparse_long',
+\verb'cc->memory_usage' which is
+\verb'size_t', and \verb'cc->SPQR_nthreads' which is \verb'int'.  Parameters
+include:
+
+\vspace{0.1in}
+{\footnotesize
+\begin{tabular}{|ll|}
+\hline
+\verb'cc->SPQR_grain' & the same as \verb'opts.grain' in the MATLAB interface \\
+\verb'cc->SPQR_small' & the same as \verb'opts.small' in the MATLAB interface \\
+\verb'cc->SPQR_nthreads'
+    & the same as \verb'opts.nthreads' in the MATLAB interface \\
+\hline
+\end{tabular}
+}
+\vspace{0.1in}
+
+Other parameters, such as \verb'opts.ordering' and \verb'opts.tol',
+are input parameters to the various C/C++ functions.  Others such as
+\verb"opts.solution='min2norm'" are separate functions in the C/C++
+interface.  Refer to the files listed above for details.
+Output statistics include:
+
+\vspace{0.1in}
+{\footnotesize
+\begin{tabular}{|ll|}
+\hline
+\verb'cc->SPQR_flopcount_bound' & an upper bound on the flop count \\
+\verb'cc->SPQR_tol_used' & the tolerance used (\verb'opts.tol') \\
+\hline
+\verb'cc->SPQR_istat [0]' & upper bound on \verb'nnz(R)' \\
+\verb'cc->SPQR_istat [1]' & upper bound on \verb'nnz(H)' \\
+\verb'cc->SPQR_istat [2]' & number of frontal matrices \\
+\verb'cc->SPQR_istat [3]' & number of TBB tasks \\
+\verb'cc->SPQR_istat [4]' & estimate of the rank of \verb'A' \\
+\verb'cc->SPQR_istat [5]' & number of column singletons \\
+\verb'cc->SPQR_istat [6]' & number of row singletons \\
+\verb'cc->SPQR_istat [7]' & ordering used \\
+\hline
+\verb'cc->memory_usage'   & memory used, in bytes \\
+\hline
+\end{tabular}
+}
+\vspace{0.1in}
+
+The upper bound on the flop count is found in the analysis phase, which ignores
+the numerical values of \verb'A' (the same analysis phase operates on both real
+and complex matrices).  Thus, if you are factorizing a complex matrix, multiply
+this statistic by 4.
+
+%-------------------------------------------------------------------------------
+\section{GPU acceleration}
+\label{GPU}
+%-------------------------------------------------------------------------------
+
+As of version 2.0.0, SuiteSparseQR now includes GPU acceleration.
+It can exploit a single NVIDIA GPU, via CUDA.  To enable GPU acceleration,
+you must compile SuiteSparseQR with non-default options.  See the
+\verb'SuiteSparse_config_GPU_gcc.mk' file in the \verb'SuiteSparse_config'
+directory for details.  The packages SuiteSparse\_GPURuntime and
+GPUQREngine are also required (they should appear in the SuiteSparse 
+directory, along with SPQR).
+
+At run time, you must also enable the GPU by setting \verb'Common->useGPU'
+to \verb'true'.  Before calling any SuiteSparseQR function, you must
+poll the GPU to set the available memory.  Below is a sample code
+that initializes CHOLMOD and then polls the GPU for use in SuiteSparseQR.
+
+\begin{verbatim}
+    size_t total_mem, available_mem ;
+    cholmod_common *cc, Common ;
+    cc = &Common ;
+    cholmod_l_start (cc) ;
+    cc->useGPU = true ;
+    cholmod_l_gpu_memorysize (&total_mem, &available_mem, cc) ;
+    cc->gpuMemorySize = available_mem ;
+    if (cc->gpuMemorySize <= 1)
+    {
+        printf ("no GPU available\n") ;
+    }
+
+    // Subsequent calls to SuiteSparseQR will use the GPU, if available
+\end{verbatim}
+
+See \verb'Demo/qrdemo_gpu.cpp' for an extended example, which can be
+compiled via \verb'make gpu' in the \verb'Demo' directory.
+
+GPU acceleration is not yet available via the MATLAB mexFunction interface. 
+We expect to include this in a future release.
+
+For a detailed technical report on the GPU-accelerated algorithm,
+see \verb'qrgpu_paper.pdf' in the \verb'Doc' directory.
+
+%-------------------------------------------------------------------------------
+\section{Requirements and Availability}
+\label{summary}
+%-------------------------------------------------------------------------------
+
+SuiteSparseQR requires four prior Collected Algorithms of the ACM: CHOLMOD
+\cite{ChenDavisHagerRajamanickam09,DavisHager09} (version 1.7 or later), AMD
+\cite{AmestoyDavisDuff96,AmestoyDavisDuff03}, and COLAMD
+\cite{DavisGilbertLarimoreNg00_algo,DavisGilbertLarimoreNg00} for its
+ordering/analysis phase and for its basic sparse matrix data structure, and the
+BLAS \cite{dddh:90} for dense matrix computations on its frontal matrices; also
+required is LAPACK \cite{LAPACK} for its Householder reflections.  An efficient
+implementation of the BLAS is strongly recommended, either vendor-provided
+(such as the Intel MKL, the AMD ACML, or the Sun Performance Library) or other
+high-performance BLAS such as those of \cite{GotoVanDeGeijn08}.
+
+The use of Intel's Threading Building Blocks is optional \cite{Reinders07}, but
+without it, only parallelism within the BLAS can be exploited (if available).
+Suite\-SparseQR can optionally use METIS 4.0.1 \cite{KarypisKumar98e} and two
+constrained minimum degree ordering algorithms, CCOLAMD and CAMD
+\cite{ChenDavisHagerRajamanickam09}, for its fill-reducing ordering options.
+SuiteSparseQR can be compiled without these ordering methods and without TBB.
+
+In addition to appearing as Collected Algorithm 8xx of the ACM, SuiteSparseQR
+is available at
+\htmladdnormallink{http://www.suitesparse.com}{http://www.suitesparse.com}
+and at MATLAB Central
+in the user-contributed File Exchange (
+\htmladdnormallink{http://www.mathworks.com/matlabcentral}{http://www.mathworks.com/matlabcentral}
+).
+See SPQR/Doc/License.txt for the license.
+Alternative licenses are also
+available; contact the author for details.
+
+%-------------------------------------------------------------------------------
+% References
+%-------------------------------------------------------------------------------
+
+\bibliographystyle{plain}
+\bibliography{paru_user_guide}
+\end{document}
+
