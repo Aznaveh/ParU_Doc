@@ -1,7 +1,7 @@
 
 default: paru_user_guide.pdf
 
-#include ../../SuiteSparse_config/SuiteSparse_config.mk
+include ../../SuiteSparse_config/SuiteSparse_config.mk
 
 paru_user_guide.pdf: paru_user_guide.tex paru_user_guide.bib Makefile
 	pdflatex paru_user_guide.tex
