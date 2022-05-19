@@ -1,5 +1,6 @@
 \documentclass[12pt]{article}
 \usepackage{hyperref}
+\usepackage{minted}
 
 \topmargin -0.5in
 \textheight 9.0in
@@ -155,119 +156,102 @@ For more options, see the {\tt SuiteSparse/README.txt} file.
 The C++ interface is written using only real matrices.  
 The simplest function computes the MATLAB equivalent of
 \verb'x=A\b' and is almost as simple:
-{\footnotesize
-\begin{verbatim}
-    #include "SuiteSparseQR.hpp"
-    X = SuiteSparseQR <double> (A, B, cc) ;
-\end{verbatim}
-}
-The C version of this function is almost identical:
-{\footnotesize
-\begin{verbatim}
-    #include "SuiteSparseQR_C.h"
-    X = SuiteSparseQR_C_backslash_default (A, B, cc) ;
-\end{verbatim}
-}
-
-Below is a simple C++ program that illustrates the use of SuiteSparseQR.  The
-program reads in a least-squares problem from \verb'stdin' in MatrixMarket
+Below is a simple C++ program that illustrates the use of ParU.  The
+program reads in a problem from \verb'stdin' in MatrixMarket
 format \cite{BoisvertPozoRemingtonBarrettDongarra97}, solves it, and prints the
-norm of the residual and the estimated rank of \verb'A'.  The comments reflect
-the MATLAB equivalent statements.  The C version of this program is identical
-except for the \verb'#include' statement and call to SuiteSparseQR which are
-replaced with the C version of the statement above, and C-style comments.
+norm of \verb'A' and the residual. 
+Some error testing code is omited to only show how the program works. The full 
+program can be found in 
+\verb'Paru/Demo/paru_demo.cpp'
+\begin{minted}{c}
+#include "ParU.hpp"
+int main(int argc, char **argv)
+{
+    cholmod_common Common, *cc;
+    cholmod_sparse *A;
+    ParU_Symbolic *Sym = NULL;
 
-{\footnotesize
-\begin{verbatim}
-    #include "SuiteSparseQR.hpp"
-    int main (int argc, char **argv)
+    //~~~~~~~~~Reading the input matrix and test if the format is OK~~~~~~~~~~~~
+    // start CHOLMOD
+    cc = &Common;
+    int mtype;
+    cholmod_l_start(cc);
+
+    // A = mread (stdin) ; read in the sparse matrix A
+    A = (cholmod_sparse *)cholmod_l_read_matrix(stdin, 1, &mtype, cc);
+    //~~~~~~~~~~~~~~~~~~~Starting computation~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ParU_Control Control;
+    ParU_Ret info;
+    info = ParU_Analyze(A, &Sym, &Control);
+    ParU_Numeric *Num;
+    info = ParU_Factorize(A, Sym, &Num, &Control);
+    double my_time = omp_get_wtime() - my_start_time;
+    //~~~~~~~~~~~~~~~~~~~Test the results ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Int m = Sym->m;
+    if (info == PARU_SUCCESS)
     {
-        cholmod_common Common, *cc ;
-        cholmod_sparse *A ;
-        cholmod_dense *X, *B, *Residual ;
-        double rnorm, one [2] = {1,0}, minusone [2] = {-1,0} ;
-        int mtype ;
-
-        // start CHOLMOD
-        cc = &Common ;
-        cholmod_l_start (cc) ;
-
-        // load A
-        A = (cholmod_sparse *) cholmod_l_read_matrix (stdin, 1, &mtype, cc) ;
-
-        // B = ones (size (A,1),1)
-        B = cholmod_l_ones (A->nrow, 1, A->xtype, cc) ;
-
-        // X = A\B
-        X = SuiteSparseQR <double> (A, B, cc) ;
-
-        // rnorm = norm (B-A*X)
-        Residual = cholmod_l_copy_dense (B, cc) ;
-        cholmod_l_sdmult (A, 0, minusone, one, X, Residual, cc) ;
-        rnorm = cholmod_l_norm_dense (Residual, 2, cc) ;
-        printf ("2-norm of residual: %8.1e\n", rnorm) ;
-        printf ("rank %ld\n", cc->SPQR_istat [4]) ;
-
-        // free everything and finish CHOLMOD
-        cholmod_l_free_dense (&Residual, cc) ;
-        cholmod_l_free_sparse (&A, cc) ;
-        cholmod_l_free_dense (&X, cc) ;
-        cholmod_l_free_dense (&B, cc) ;
-        cholmod_l_finish (cc) ;
-        return (0) ;
+        double *b = (double *)malloc(m * sizeof(double));
+        double *xx = (double *)malloc(m * sizeof(double));
+        for (Int i = 0; i < m; ++i) b[i] = i + 1;
+        info = ParU_Solve(Sym, Num, b, xx, &Control);
+        printf("Solve time is %lf seconds.\n", my_solve_time);
+        double resid, anorm;
+        info = ParU_Residual(A, xx, b, m, resid, anorm, &Control);
+        printf("Residual is |%.2lf| and anorm is %.2e and rcond is %.2e.\n",
+                resid == 0 ? 0 : log10(resid), anorm, Num->rcond);
+        free(b);
+        free(xx);
     }
-\end{verbatim}
+    //~~~~~~~~~~~~~~~~~~~End computation~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Int max_threads = omp_get_max_threads();
+    BLAS_set_num_threads(max_threads);
+
+    //~~~~~~~~~~~~~~~~~~~Free Everything~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ParU_Freenum(&Num, &Control);
+    ParU_Freesym(&Sym, &Control);
+
+    cholmod_l_free_sparse(&A, cc);
+    cholmod_l_finish(cc);
 }
+\end{minted}
+
 
 %-------------------------------------------------------------------------------
 \subsection{C++ Syntax}
 %-------------------------------------------------------------------------------
 
-All features available to the MATLAB user are also available to both the C and
-C++ interfaces using a syntax that is not much more complicated than the MATLAB
-syntax.  Additional features not available via the MATLAB interface include the
-ability to compute the symbolic and numeric factorizations separately (for
-multiple matrices with the same nonzero pattern but different numerical
-values).  The following is a list of user-callable C++ functions and what they
+The following is a list of user-callable C++ functions and what they
 can do:
 
 \begin{enumerate}
 
-    \item \verb'SuiteSparseQR': an overloaded function that provides functions
-    equivalent to \verb'spqr' and \verb'spqr_solve' in the SuiteSparseQR MATLAB
-    interface.
+    \item \verb'ParU_Version': return the version of the ParU package 
+        you are using.
 
-    \item \verb'SuiteSparseQR_factorize': performs both the symbolic and
-    numeric factorizations and returns a QR factorization object such that
-    \verb'A*P=Q*R'.  It always exploits singletons.
+    \item \verb'ParU_Analyze': Symbolic analysis is done in this routine. 
+        UMFPACK is called here and after that some more speciallized symbolic
+        computation is done for ParU. 
+        \verb'ParU_Analyze' called once and used for differen 
+        \verb'ParU_Factorize'
+        calls.
+    \item \verb'ParU_Factorize': 
+        Numeric factorization is done in this routine. Scaling and
+        making Sx matrix, computing factors and permutations is here. 
+        \verb'ParU_Symbolic' structure is computed \verb'ParU_Analyze' 
+        and is an input in this routine.
 
-    \item \verb'SuiteSparseQR_symbolic': performs the symbolic factorization
-    and returns a QR factorization object to be passed to
-    \verb'SuiteSparseQR_numeric'.  It does not exploit singletons.
+    \item \verb'ParU_Solve':  
+        Using symbolic analysis and factorization phase output to solve $Ax=b$.
+        In all the solve routines Num structure must come with the same 
+        Sym struct that comes from \verb'ParU_Factorize'. 
+        This routin is overloaded and can solve differently. It has versions 
+        that keep a copy of x or overwrite on it. Also it can solve multiple 
+        right hand side problems.
 
-    \item \verb'SuiteSparseQR_numeric': performs the numeric factorization on a
-    QR factorization object, either one constructed by
-    \verb'SuiteSparseQR_symbolic', or reusing one from a prior call to
-    \verb'SuiteSparseQR_numeric' for a matrix \verb'A' with the same pattern as
-    the first one, but with different numerical values.
+    \item \verb'ParU_Freenum':  frees the numerical part of factorization.
 
-    \item \verb'SuiteSparseQR_solve': solves a linear system using the object
-    returned by \newline \verb'SuiteSparseQR_factorize' or
-    \verb'SuiteSparseQR_numeric', namely \verb"x=R\b", \newline \verb"x=P*R\b",
-    \verb"x=R'\b", or \verb"x=R'\(P'*b)".
 
-    \item \verb'SuiteSparseQR_qmult': provides the same function as
-    \verb'spqr_qmult' in the MATLAB interface, computing
-    \verb"Q'*x", \verb"Q*x", \verb"x*Q'", or \verb"x*Q".
-    It uses either a QR factorization
-    in MATLAB-style sparse matrix format, or the QR factorization object
-    returned by \newline \verb'SuiteSparseQR_factorize' or
-    \verb'SuiteSparseQR_numeric'.
-
-    \item \verb'SuiteSparseQR_min2norm': finds the minimum 2-norm solution to
-    an underdetermined linear system.
-
-    \item \verb'SuiteSparseQR_free': frees the QR factorization object.
+    \item \verb'ParU_Freesym':  frees the symbolic part of factorization.
 
 \end{enumerate}
 
@@ -279,55 +263,20 @@ For further details of how to use the C/C++ syntax, please refer to the
 definitions and descriptions in the following files:
 
 \begin{enumerate}
-\item \verb'SuiteSparse/SPQR/Include/SuiteSparseQR.hpp' describes each
-C++ function.  Both \verb'double' and \verb'std::complex<double>' matrices
-are supported.
+\item \verb'SuiteSparse/ParU/Include/ParU.hpp' describes each
+C++ function.  Only \verb'double' and square matrices are supported.
 
-\item \verb'SuiteSparse/SPQR/Include/SuiteSparseQR_definitions.h' describes
-definitions \newline common to both C and C++ functions.  For example, each of
-the ordering methods is given a \verb'#define''d name.  The default is
-\verb'ordering = SPQR_ORDERING_DEFAULT', and the default tolerance is given by
-\verb'tol = SPQR_DEFAULT_TOL'.
 
-\item \verb'SuiteSparse/SPQR/Include/SuiteSparseQR_C.h' describes
+\item \verb'SuiteSparse/ParU/Include/ParU.h' describes
 the C-callable functions.
 
 \end{enumerate}
 
-Most of the packages in SuiteSparse come in multiple versions with different
-sized integers.  The first is the plain C/C++ \verb'int'.  The second the
-\verb'SuiteSparse_long' integer, defined in the
-\verb'SuiteSparse/SuiteSparse_config/SuiteSparse_config.h'
-file.  This integer is \verb'long' except on a Windows-64 platform for which it
-is the  \verb'__int64' type.  The intent of \verb'SuiteSparse_long'
-is that it should be
-32-bits on a 32-bit platform, and 64-bits on a 64-bit platform.  
+There are C/C++ options to control ParU which is an input argument to several 
+routines. When you make \verb'ParU_Control' object it is initialized with 
+default values. The user can change the values. Here are the list of control 
+options:
 
-By contrast, SuiteSparseQR only provides a \verb'SuiteSparse_long' version.
-Most users (except Windows-64) can simply use \verb'long' as the basic integer
-type passed to and returned from SuiteSparseQR.
-
-The C/C++ options corresponding to the MATLAB \verb'opts' parameters and the
-contents of the optional \verb'info' output of \verb'spqr_solve' are described
-below.  Let \verb'cc' be the CHOLMOD \verb'Common' object, containing parameter
-settings and statistics.  All are of type \verb'double', except for
-\verb'SPQR_istat' which is \verb'SuiteSparse_long',
-\verb'cc->memory_usage' which is
-\verb'size_t', and \verb'cc->SPQR_nthreads' which is \verb'int'.  Parameters
-include:
-
-\vspace{0.1in}
-{\footnotesize
-\begin{tabular}{|ll|}
-\hline
-\verb'cc->SPQR_grain' & the same as \verb'opts.grain' in the MATLAB interface \\
-\verb'cc->SPQR_small' & the same as \verb'opts.small' in the MATLAB interface \\
-\verb'cc->SPQR_nthreads'
-    & the same as \verb'opts.nthreads' in the MATLAB interface \\
-\hline
-\end{tabular}
-}
-\vspace{0.1in}
 
 Other parameters, such as \verb'opts.ordering' and \verb'opts.tol',
 are input parameters to the various C/C++ functions.  Others such as
@@ -337,89 +286,56 @@ Output statistics include:
 
 \vspace{0.1in}
 {\footnotesize
-\begin{tabular}{|ll|}
+\begin{tabular}{|lll|}
 \hline
-\verb'cc->SPQR_flopcount_bound' & an upper bound on the flop count \\
-\verb'cc->SPQR_tol_used' & the tolerance used (\verb'opts.tol') \\
+    \verb'ParU_Control' & default value & explanation  \\
+\hline\hline
+\verb'mem_chunk' & $1024*1024$ & chunk size for memset and memcpy\\
+\verb'umfpack_ordering' & \verb'UMFPACK_ORDERING_METIS' & default UMFPACK ordering\\
+\verb'umfpack_strategy' & \verb'UMFPACK_STRATEGY_AUTO'& default UMFPACK strategy\\
+\verb'relaxed_amalgamation_threshold' & 32 & threshold for relaxed amalgamation \\
 \hline
-\verb'cc->SPQR_istat [0]' & upper bound on \verb'nnz(R)' \\
-\verb'cc->SPQR_istat [1]' & upper bound on \verb'nnz(H)' \\
-\verb'cc->SPQR_istat [2]' & number of frontal matrices \\
-\verb'cc->SPQR_istat [3]' & number of TBB tasks \\
-\verb'cc->SPQR_istat [4]' & estimate of the rank of \verb'A' \\
-\verb'cc->SPQR_istat [5]' & number of column singletons \\
-\verb'cc->SPQR_istat [6]' & number of row singletons \\
-\verb'cc->SPQR_istat [7]' & ordering used \\
-\hline
-\verb'cc->memory_usage'   & memory used, in bytes \\
+\verb'scale' & 1 & if 1 matrix will be scaled using \verb'max_row'\\
+\verb'panel_width' & 32 & width of panel for dense factorizaiton\\
+\verb'paru_strategy' & \verb'PARU_STRATEGY_AUTO' & default strategy for ParU\\
+\verb'piv_toler' & $0.1$ & tolerance for accepting sparse pivots\\
+\verb'diag_toler' & $0.001$ & tolerance for accepting symmetric pivots\\
+\verb'trivial' & $4$ & Do not call BLAS for smaller dgemms\\
+\verb'worthwhile_dgemm' & $512$ & dgemms bigger than worthwhile are tasked\\
+\verb'worthwhile_trsm' & $4096$ & trsm bigger than worthwhile are tasked\\
+\verb'paru_max_threads' & $0$ & initialized with \verb'omp_max_threads' \\
 \hline
 \end{tabular}
 }
 \vspace{0.1in}
 
-The upper bound on the flop count is found in the analysis phase, which ignores
-the numerical values of \verb'A' (the same analysis phase operates on both real
-and complex matrices).  Thus, if you are factorizing a complex matrix, multiply
-this statistic by 4.
+The first row of the options are used in symbolic analysis. In the symbolic 
+analysis phase only the pattern of the matrix and numerical values are not 
+probed. The second row have impact on numerical analysis.
 
-%-------------------------------------------------------------------------------
-\section{GPU acceleration}
-\label{GPU}
-%-------------------------------------------------------------------------------
-
-As of version 2.0.0, SuiteSparseQR now includes GPU acceleration.
-It can exploit a single NVIDIA GPU, via CUDA.  To enable GPU acceleration,
-you must compile SuiteSparseQR with non-default options.  See the
-\verb'SuiteSparse_config_GPU_gcc.mk' file in the \verb'SuiteSparse_config'
-directory for details.  The packages SuiteSparse\_GPURuntime and
-GPUQREngine are also required (they should appear in the SuiteSparse 
-directory, along with SPQR).
-
-At run time, you must also enable the GPU by setting \verb'Common->useGPU'
-to \verb'true'.  Before calling any SuiteSparseQR function, you must
-poll the GPU to set the available memory.  Below is a sample code
-that initializes CHOLMOD and then polls the GPU for use in SuiteSparseQR.
-
-\begin{verbatim}
-    size_t total_mem, available_mem ;
-    cholmod_common *cc, Common ;
-    cc = &Common ;
-    cholmod_l_start (cc) ;
-    cc->useGPU = true ;
-    cholmod_l_gpu_memorysize (&total_mem, &available_mem, cc) ;
-    cc->gpuMemorySize = available_mem ;
-    if (cc->gpuMemorySize <= 1)
-    {
-        printf ("no GPU available\n") ;
-    }
-
-    // Subsequent calls to SuiteSparseQR will use the GPU, if available
-\end{verbatim}
-
-See \verb'Demo/qrdemo_gpu.cpp' for an extended example, which can be
-compiled via \verb'make gpu' in the \verb'Demo' directory.
-
-GPU acceleration is not yet available via the MATLAB mexFunction interface. 
-We expect to include this in a future release.
-
-For a detailed technical report on the GPU-accelerated algorithm,
-see \verb'qrgpu_paper.pdf' in the \verb'Doc' directory.
-
+\verb'paru_max_threads' is initalized by \verb'omp_max_threads' if the user do 
+not provide a smaller number.
+If \verb'paru_strategy' is set to \verb'PARU_STRATEGY_AUTO' ParU uses the same 
+strategy as UMFPACK, however user can ask UMFPACK for a unsymmteric strategy 
+but use a symmteric strategy for ParU.
+    
 %-------------------------------------------------------------------------------
 \section{Requirements and Availability}
 \label{summary}
 %-------------------------------------------------------------------------------
 
-SuiteSparseQR requires four prior Collected Algorithms of the ACM: CHOLMOD
+ParU requires several Collected Algorithms of the ACM: CHOLMOD
 \cite{ChenDavisHagerRajamanickam09,DavisHager09} (version 1.7 or later), AMD
-\cite{AmestoyDavisDuff96,AmestoyDavisDuff03}, and COLAMD
-\cite{DavisGilbertLarimoreNg00_algo,DavisGilbertLarimoreNg00} for its
+\cite{AmestoyDavisDuff96,AmestoyDavisDuff03}, COLAMD
+\cite{DavisGilbertLarimoreNg00_algo,DavisGilbertLarimoreNg00} and UMFPACK 
+\cite{10.1145/992200.992206} for its
 ordering/analysis phase and for its basic sparse matrix data structure, and the
-BLAS \cite{dddh:90} for dense matrix computations on its frontal matrices; also
-required is LAPACK \cite{LAPACK} for its Householder reflections.  An efficient
-implementation of the BLAS is strongly recommended, either vendor-provided
-(such as the Intel MKL, the AMD ACML, or the Sun Performance Library) or other
-high-performance BLAS such as those of \cite{GotoVanDeGeijn08}.
+BLAS \cite{dddh:90} for dense matrix computations on its frontal matrices. 
+An efficient implementation of the BLAS is strongly recommended, either
+vendor-provided (such as the Intel MKL, the AMD ACML, or the 
+Sun Performance Library) or other high-performance BLAS such as those of 
+\cite{GotoVanDeGeijn08}. Note that while ParU uses nested parallelism heavily
+the right options for BLAS library must be chosen.
 
 The use of Intel's Threading Building Blocks is optional \cite{Reinders07}, but
 without it, only parallelism within the BLAS can be exploited (if available).
